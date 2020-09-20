@@ -2,7 +2,7 @@
 #include <iostream>
 #include "common.h"
 
-__global__ void addKernel(const int* dev_a, const int* dev_b, int* dev_c); //matrix addition(device code)
+__global__ void addKernel(const int* dev_a, const int* dev_b, int* dev_c, int n); //matrix addition(device code)
 void matrixAdd(int** A, int** B, int** C, int HEIGHT, int WIDTH); //loading, transfer, execution(host code)
 void printArray(int **array,int HEIGHT, int WIDTH); // print Array elements
 int main(int argc, char * argv[]){
@@ -55,12 +55,14 @@ int main(int argc, char * argv[]){
 
 // Compute vector sum C = A+B
 // Each thread performs one pairwise addition
-__global__ void addKernel(const int* dev_a, const int* dev_b, int*dev_c)
+__global__ void addKernel(const int* dev_a, const int* dev_b, int*dev_c, int n)
 {
     int x = (blockIdx.x*blockDim.x)+threadIdx.x; //global index of x
     int y = (blockIdx.y*blockDim.y)+threadIdx.y; //global index of y
     int i = y * (blockDim.x) + x;   //actual index of i(1D array)
-    dev_c[i] = dev_a[i] + dev_b[i];
+    //error handling
+    if(i<n)
+        dev_c[i] = dev_a[i] + dev_b[i];
 }
 
 void matrixAdd(int** A, int** B, int** C, int HEIGHT,int WIDTH)
@@ -69,11 +71,12 @@ void matrixAdd(int** A, int** B, int** C, int HEIGHT,int WIDTH)
     int* dev_b=0;
     int* dev_c=0;
     int y=0;
+    int SIZE=HEIGHT*WIDTH;
 
     // Allocate device memory
-    CUDA_CHECK(cudaMalloc((void **)&dev_a, HEIGHT*WIDTH*sizeof(int)));
-    CUDA_CHECK(cudaMalloc((void **)&dev_b, HEIGHT*WIDTH*sizeof(int)));
-    CUDA_CHECK(cudaMalloc((void **)&dev_c, HEIGHT*WIDTH*sizeof(int)));
+    CUDA_CHECK(cudaMalloc((void **)&dev_a, SIZE*sizeof(int)));
+    CUDA_CHECK(cudaMalloc((void **)&dev_b, SIZE*sizeof(int)));
+    CUDA_CHECK(cudaMalloc((void **)&dev_c, SIZE*sizeof(int)));
 
     // Transfer A and B to device memory (need flattening)
     for(y=0;y<HEIGHT;y++){
@@ -82,7 +85,7 @@ void matrixAdd(int** A, int** B, int** C, int HEIGHT,int WIDTH)
     }
     
     //configure grid ==> <<<number of thread blocks within grid, number of threads in each thread block>>> 
-    addKernel<<<ceil(WIDTH*HEIGHT/256.0), 256>>>(dev_a, dev_b, dev_c);
+    addKernel<<<ceil(WIDTH*HEIGHT/256.0), 256>>>(dev_a, dev_b, dev_c, SIZE);
 
     // Transfer C from device to host
     for(y=0;y<HEIGHT;y++){
