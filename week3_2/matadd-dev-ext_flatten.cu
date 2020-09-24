@@ -4,13 +4,13 @@
 #include "common.h"
 // Compute vector sum C = A+B
 // Each thread performs one pairwise addition
-__global__ void addKernel(const int* dev_a, const int* dev_b, int*dev_c, int HEIGHT,int WIDTH)
+__global__ void addKernel(const int* dev_a, const int* dev_b, int*dev_c, int WIDTH,int SIZE)
 {
     int x = (blockIdx.x*blockDim.x)+threadIdx.x; //global index of x
     int y = (blockIdx.y*blockDim.y)+threadIdx.y; //global index of y
     int i = y * WIDTH + x;   //actual index of i(1D array)
     //error handling
-    if(i<HEIGHT*WIDTH)
+    if(i<SIZE)
         dev_c[i] = dev_a[i] + dev_b[i];
 }
 int main(int argc, char*argv[]){
@@ -53,7 +53,7 @@ int main(int argc, char*argv[]){
     dim3 dimBlock(WIDTH,HEIGHT,1);
     
     //configure grid ==> <<<number of thread blocks within grid, number of threads in each thread block>>> 
-    addKernel<<<ceil(SIZE/256.0), 256>>>(dev_a, dev_b, dev_c,HEIGHT,WIDTH);
+    addKernel<<<ceil(SIZE/256.0), 256>>>(dev_a, dev_b, dev_c,WIDTH,SIZE);
     
     // Transfer C from device to host
     CUDA_CHECK(cudaMemcpy(c, dev_c, SIZE*sizeof(int), cudaMemcpyDeviceToHost));

@@ -2,7 +2,7 @@
 #include <iostream>
 #include "common.h"
 
-__global__ void addKernel(const int* dev_a, const int* dev_b, int* dev_c, int HEIGHT,int WIDTH); //matrix addition(device code)
+__global__ void addKernel(const int* dev_a, const int* dev_b, int* dev_c, int WIDTH,int SIZE); //matrix addition(device code)
 void matrixAdd(int** A, int** B, int** C, int HEIGHT, int WIDTH); //loading, transfer, execution(host code)
 void printArray(int **array,int HEIGHT, int WIDTH); // print Array elements
 int main(int argc, char * argv[]){
@@ -55,13 +55,13 @@ int main(int argc, char * argv[]){
 
 // Compute vector sum C = A+B
 // Each thread performs one pairwise addition
-__global__ void addKernel(const int* dev_a, const int* dev_b, int*dev_c, int HEIGHT,int WIDTH)
+__global__ void addKernel(const int* dev_a, const int* dev_b, int*dev_c, int WIDTH,int SIZE)
 {
     int x = (blockIdx.x*blockDim.x)+threadIdx.x; //global index of x
     int y = (blockIdx.y*blockDim.y)+threadIdx.y; //global index of y
     int i = y * WIDTH + x;   //actual index of i(1D array)
     //error handling
-    if(i<HEIGHT*WIDTH)
+    if(i<SIZE)
         dev_c[i] = dev_a[i] + dev_b[i];
 }
 
@@ -85,7 +85,7 @@ void matrixAdd(int** A, int** B, int** C, int HEIGHT,int WIDTH)
     }
     
     //configure grid ==> <<<number of thread blocks within grid, number of threads in each thread block>>> 
-    addKernel<<<ceil(WIDTH*HEIGHT/256.0), 256>>>(dev_a, dev_b, dev_c, HEIGHT,SIZE);
+    addKernel<<<ceil(WIDTH*HEIGHT/256.0), 256>>>(dev_a, dev_b, dev_c, WIDTH,SIZE);
 
     // Transfer C from device to host
     for(y=0;y<HEIGHT;y++){
