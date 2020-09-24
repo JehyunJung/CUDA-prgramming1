@@ -2,46 +2,48 @@
 #include <iostream>
 #include "common.h"
 
-__global__ void addKernel(const int* dev_a, const int* dev_b, int* dev_c, int HEIGHT,int WIDTH); //matrix addition(device code)
-void matrixAdd(int** A, int** B, int** C, int HEIGHT, int WIDTH); //loading, transfer, execution(host code)
-void printArray(int **array,int HEIGHT, int WIDTH); // print Array elements
+__global__ void mulKernel(const int* dev_a, const int* dev_b, int* dev_c, int WIDTH); //matrix addition(device code)
+void matrixMul(int** A, int** B, int** C, int WIDTH); //loading, transfer, execution(host code)
+void printArray(int **array, int WIDTH); // print Array elements
 int main(int argc, char * argv[]){
-    int HEIGHT, WIDTH;
+    int WIDTH;
     int x,y;
     int **a,**b,**c;
     
-    if(argc<3){
+    if(argc<2){
         printf("Not inserted block size, Try again\n");
         exit(-1);
     }
     //allocating program arguments
-    HEIGHT=atoi(argv[1]);
-    WIDTH=atoi(argv[2]);
+    WIDTH=atoi(argv[1]);
 
     //2D array dynamic allocation 
-    a=(int**)malloc(sizeof(int*)*HEIGHT);
-    b=(int**)malloc(sizeof(int*)*HEIGHT);
-    c=(int**)malloc(sizeof(int*)*HEIGHT);
+    a=(int**)malloc(sizeof(int*)*WIDTH);
+    b=(int**)malloc(sizeof(int*)*WIDTH);
+    c=(int**)malloc(sizeof(int*)*WIDTH);
 
-    for(y=0;y<HEIGHT;y++){
+    for(y=0;y<WIDTH;y++){
         a[y]=(int*)malloc(sizeof(int)*WIDTH);
         b[y]=(int*)malloc(sizeof(int)*WIDTH);
         c[y]=(int*)malloc(sizeof(int)*WIDTH);
     }
     
     //initializing 2D array
-   for(y=0;y<HEIGHT;y++){
+   for(y=0;y<WIDTH;y++){
        for(x=0;x<WIDTH;x++){
            a[y][x]=y*10+x;
            b[y][x]=(y*10+x)*100;
         }
    }
 
-   matrixAdd(a,b,c,HEIGHT,WIDTH);
-   printArray(c,HEIGHT,WIDTH);
+
+   clock_t start=clock();
+   matrixMul(a,b,c,WIDTH);
+   printArray(c,WIDTH);
+   printf("Matrix Multiplication execution time(Parallel): %fms\n",(double)(clock()-start));
 
    //free 2D array
-    for(y=0;y<HEIGHT;y++){
+    for(y=0;y<WIDTH;y++){
         free(a[y]);
         free(b[y]);
         free(c[y]);
@@ -53,25 +55,27 @@ int main(int argc, char * argv[]){
     return 0;
 }
 
-// Compute vector sum C = A+B
+// Compute matrix multiplication
 // Each thread performs one pairwise addition
-__global__ void addKernel(const int* dev_a, const int* dev_b, int*dev_c, int HEIGHT,int WIDTH)
+__global__ void mulKernel(const int* dev_a, const int* dev_b, int*dev_c, int WIDTH)
 {
-    int x = (blockIdx.x*blockDim.x)+threadIdx.x; //global index of x
-    int y = (blockIdx.y*blockDim.y)+threadIdx.y; //global index of y
-    int i = y * WIDTH + x;   //actual index of i(1D array)
-    //error handling
-    if(i<HEIGHT*WIDTH)
-        dev_c[i] = dev_a[i] + dev_b[i];
+    int x = threadIdx.x; //global index of x
+    int y = threadIdx.y; //global index of y
+    int i = y * (blockDim.x) + x;   //actual index of i(1D array)
+    int k,sum=0;
+    
+    for(k=0;k<WIDTH;k++)
+        sum+=dev_a[y*WIDTH+k]*dev_b[k*WIDTH+x];
+    dev_c[i]=sum;
 }
 
-void matrixAdd(int** A, int** B, int** C, int HEIGHT,int WIDTH)
+void matrixMul(int** A, int** B, int** C, int WIDTH)
 {
     int* dev_a=0;
     int* dev_b=0;
     int* dev_c=0;
     int y=0;
-    int SIZE=HEIGHT*WIDTH;
+    int SIZE=WIDTH*WIDTH;
 
     // Allocate device memory
     CUDA_CHECK(cudaMalloc((void **)&dev_a, SIZE*sizeof(int)));
@@ -79,16 +83,17 @@ void matrixAdd(int** A, int** B, int** C, int HEIGHT,int WIDTH)
     CUDA_CHECK(cudaMalloc((void **)&dev_c, SIZE*sizeof(int)));
 
     // Transfer A and B to device memory (need flattening)
-    for(y=0;y<HEIGHT;y++){
+    for(y=0;y<WIDTH;y++){
         CUDA_CHECK(cudaMemcpy(&dev_a[y*WIDTH], A[y], WIDTH*sizeof(int), cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(&dev_b[y*WIDTH], B[y], WIDTH*sizeof(int), cudaMemcpyHostToDevice));
     }
     
+    dim3 dimBlock(WIDTH,WIDTH,1);
     //configure grid ==> <<<number of thread blocks within grid, number of threads in each thread block>>> 
-    addKernel<<<ceil(WIDTH*HEIGHT/256.0), 256>>>(dev_a, dev_b, dev_c, HEIGHT,SIZE);
+    mulKernel<<<1,dimBlock>>>(dev_a, dev_b, dev_c, WIDTH);
 
     // Transfer C from device to host
-    for(y=0;y<HEIGHT;y++){
+    for(y=0;y<WIDTH;y++){
         CUDA_CHECK(cudaMemcpy(C[y], &dev_c[y*WIDTH], WIDTH*sizeof(int), cudaMemcpyDeviceToHost));
     }
 
@@ -98,11 +103,11 @@ void matrixAdd(int** A, int** B, int** C, int HEIGHT,int WIDTH)
     CUDA_CHECK(cudaFree(dev_c));
 }
 
-void printArray(int **array,int HEIGHT, int WIDTH){
+void printArray(int **array,int WIDTH){
     int x,y;
-    for(y=0;y<HEIGHT;y++){
+    for(y=0;y<WIDTH;y++){
         for(x=0;x<WIDTH;x++)
-            printf("%5d",array[y][x]);  
+            printf("%10d",array[y][x]);  
         printf("\n");
     }
 }
