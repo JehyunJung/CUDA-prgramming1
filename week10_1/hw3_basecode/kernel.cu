@@ -1,7 +1,7 @@
 __global__ void convolution(Matrix N, Matrix P)
 {
     //INSERT KERNEL CODE HERE
-    __shared__ float N_ds[BL_SIZE][BLOCK_SIZE];
+    __shared__ float N_ds[BLOCK_SIZE][BLOCK_SIZE];
     int ty=threadIdx.y;
     int tx=threadIdx.x;
     int i,j;
