@@ -7,7 +7,7 @@ using namespace std;
 
 //INSERT CODE HERE---------------------------------
 //Counting Sort
-__global__ void countingData(int * pSource_d,int *dataCounter_d,int input_size){
+__global__ void countingData(int * pSource_d,int *offsetArray,int input_size){
 	//Shared memory for saving data counts
 	__shared__ int dataCounter_s[DATASIZE];
 
@@ -15,8 +15,7 @@ __global__ void countingData(int * pSource_d,int *dataCounter_d,int input_size){
 	int gx=blockIdx.x*blockDim.x + tx;
 	
 	//set initial value of array elements to 0
-	if(tx<DATASIZE)
-		dataCounter_s[tx]=0;
+	dataCounter_s[tx]=0;
 	__syncthreads();	
 		
 	if(gx<input_size)
@@ -25,41 +24,45 @@ __global__ void countingData(int * pSource_d,int *dataCounter_d,int input_size){
 	__syncthreads();
 	
 	//add all shared memory values
-	if(tx<DATASIZE)
-		atomicAdd(&(dataCounter_d[tx]),dataCounter_s[tx]);
+	atomicAdd(&(offsetArray[tx]),dataCounter_s[tx]);
 }
 
 //Prefix Sum(Double-Buffered Kogge-Stone Parallel Scan Algorithm)
-__global__ void prefixSum(int * pResult_d, int * dataCounter_d){
-	__shared__ int source[2*DATASIZE];
-	__shared__ int destination[2*DATASIZE];
+__global__ void prefixSum(int * pResult_d, int * offsetArray){
+	__shared__ int source[DATASIZE];
+	__shared__ int destination[DATASIZE];
 	int tx=threadIdx.x;
 	int temp;
 	int stride=1;
 	int index,i;
 
-	source[tx]=0;
-	destination[tx]=0;
-	source[DATASIZE+tx]=dataCounter_d[tx];
+	source[tx]=offsetArray[tx];
 	__syncthreads();
 
 	while(1){
-		index=2*DATASIZE-tx-1;
-		destination[index]=source[index]+source[index-stride];
+		index=DATASIZE-tx-1;
+		if(index>=stride)
+			destination[index]=source[index]+source[index-stride];
+		else
+			destination[index]=source[index];
 		__syncthreads();
 		stride*=2;
 		if(stride>DATASIZE)
 			break;
-		
+
 		//Swap between arrays
-		index=DATASIZE+tx;
-		temp=source[index];
-		source[index]=destination[index];
-		destination[index]=temp;
+		temp=source[tx];
+		source[tx]=destination[tx];
+		destination[tx]=temp;
 	}
 
-	for(i=destination[DATASIZE+tx-1];i<destination[DATASIZE+tx];i++){
-		pResult_d[i]=tx;
+	if(tx==0){
+		for(i=0;i<destination[tx];i++)
+			pResult_d[i]=tx;
+	}
+	else{
+		for(i=destination[tx-1];i<destination[tx];i++)
+			pResult_d[i]=tx;
 	}
 }
 
@@ -118,31 +121,30 @@ int main(int argc, char* argv[]) {
 	//Device Memory
 	int *pSource_d;
 	int *pResult_d;
-	int *dataCounter_d;
+	int *offsetArray;
 
 	//Device memory allocation
 	cudaMalloc((void**)&pSource_d,input_size*sizeof(int));
 	cudaMalloc((void**)&pResult_d,input_size*sizeof(int));
-	cudaMalloc((void**)&dataCounter_d,DATASIZE*sizeof(int));
+	cudaMalloc((void**)&offsetArray,DATASIZE*sizeof(int));
 
 	//Copy Host to Device
 	cudaMemcpy(pSource_d,pSource,input_size*sizeof(int),cudaMemcpyHostToDevice);
 	
 	//launch kernel
-	dim3 dimGrid(ceil((double)input_size/BLOCKSIZE),1,1);
-    dim3 dimBlock(BLOCKSIZE,1,1);
-    countingData<<< dimGrid, dimBlock>>>(pSource_d,dataCounter_d,input_size);
+	dim3 dimGrid(ceil((double)input_size/DATASIZE),1,1);
+    dim3 dimBlock(DATASIZE,1,1);
+    countingData<<< dimGrid, dimBlock>>>(pSource_d,offsetArray,input_size);
 	cudaDeviceSynchronize();
 
-	prefixSum<<<1,DATASIZE>>>(pResult_d,dataCounter_d);
+	prefixSum<<<1,DATASIZE>>>(pResult_d,offsetArray);
 	cudaDeviceSynchronize();
 	//Copy Device to Host
 	cudaMemcpy(pResult,pResult_d,input_size*sizeof(int),cudaMemcpyDeviceToHost);
-
 	//Free Device Memory
 	cudaFree(pSource_d);
 	cudaFree(pResult_d);
-	cudaFree(dataCounter_d);
+	cudaFree(offsetArray);
 
 	// end timer
 	float time;
