@@ -31,46 +31,35 @@ __global__ void countingData(int * pSource_d,int *dataCounter_d,int input_size){
 
 //Prefix Sum(Double-Buffered Kogge-Stone Parallel Scan Algorithm)
 __global__ void prefixSum(int * pResult_d, int * dataCounter_d){
-	__shared__ int T[DATASIZE];
+	__shared__ int source[2*DATASIZE];
+	__shared__ int destination[2*DATASIZE];
+	int tx=threadIdx.x;
+	int temp;
 	int stride=1;
 	int index,i;
-	int tx=threadIdx.x;
-	
-	T[tx]=dataCounter_d[tx];
-	index=DATASIZE/2+tx;
-	T[index]=dataCounter_d[index];
+
+	source[tx]=0;
+	destination[tx]=0;
+	source[DATASIZE+tx]=dataCounter_d[tx];
 	__syncthreads();
-
-	while(stride<DATASIZE){
-		index=(tx+1)*stride*2-1;
-		if(index<DATASIZE)
-			T[index]+=T[index-stride];
+	
+	while(1){
+		index=DATASIZE+tx;
+		destination[index]=source[index]+source[index-stride];
+		__syncthreads();
 		stride*=2;
-
-		__syncthreads();
-	}
-	stride/=2;
-	while(stride>=1){
-		index=(tx+1)*stride*2-1;
-		if(index<DATASIZE && (index+stride)<DATASIZE)
-			T[index+stride]+=T[index];
-		stride/=2;
+		if(stride>DATASIZE)
+			break;
 		
+		//Swap between arrays
+		temp=source[index];
+		source[index]=destination[index];
+		destination[index]=temp;
 		__syncthreads();
 	}
 
-	if(tx==0)
-		for(i=0;i<T[tx];i++)
-			pResult_d[i]=tx;
-		
-	else{
-		index=tx;
-		for(i=T[index-1];i<T[index];i++)
-			pResult_d[i]=index;
-		index=tx+DATASIZE/2;
-		if(index<DATASIZE)
-			for(i=T[index-1];i<T[index];i++)
-				pResult_d[i]=index;	
+	for(i=destination[DATASIZE+tx-1];i<destination[DATASIZE+tx];i++){
+		pResult_d[i]=tx;
 	}
 }
 
@@ -130,10 +119,12 @@ int main(int argc, char* argv[]) {
 	int *pSource_d;
 	int *pResult_d;
 	int *dataCounter_d;
+
 	//Device memory allocation
 	cudaMalloc((void**)&pSource_d,input_size*sizeof(int));
 	cudaMalloc((void**)&pResult_d,input_size*sizeof(int));
 	cudaMalloc((void**)&dataCounter_d,DATASIZE*sizeof(int));
+
 	//Copy Host to Device
 	cudaMemcpy(pSource_d,pSource,input_size*sizeof(int),cudaMemcpyHostToDevice);
 	
@@ -142,10 +133,12 @@ int main(int argc, char* argv[]) {
     dim3 dimBlock(BLOCKSIZE,1,1);
     countingData<<< dimGrid, dimBlock>>>(pSource_d,dataCounter_d,input_size);
 	cudaDeviceSynchronize();
-	prefixSum<<<1,(DATASIZE/2)+1>>>(pResult_d,dataCounter_d);
+
+	prefixSum<<<1,DATASIZE>>>(pResult_d,dataCounter_d);
 	cudaDeviceSynchronize();
 	//Copy Device to Host
 	cudaMemcpy(pResult,pResult_d,input_size*sizeof(int),cudaMemcpyDeviceToHost);
+
 	//Free Device Memory
 	cudaFree(pSource_d);
 	cudaFree(pResult_d);
